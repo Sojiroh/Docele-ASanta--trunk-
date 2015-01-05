@@ -1,0 +1,219 @@
+package cl.facele.docele.aguasanta;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.text.NumberFormat;
+import java.util.Locale;
+
+import org.apache.log4j.Logger;
+
+import cl.facele.docele.unysoft.bussines.Transformer;
+
+
+public class ProcesaTXT {
+	Bean bean;
+	Logger logger = Logger.getLogger(ProcesaTXT.class);
+	String observaciones;
+	String encabezado;
+	String detalle;
+	String referencias;
+	String descuentos;
+	long subTotal;
+
+	private void setSubtotal(long subTotal) {
+		NumberFormat nFormateador = NumberFormat.getInstance(Locale.GERMAN);
+		nFormateador.setMaximumFractionDigits(0);
+		String subTotalFormatted = nFormateador.format(subTotal);
+				
+		String str[] = observaciones.split(";");
+		observaciones = "";
+		int n = 0;
+		for (String campo: str) {
+			if (n == 3)
+				observaciones += campo + "|";
+			else if (n == 4)
+				observaciones += campo + "|";
+			else if (n == 5)
+				observaciones += campo + ";;;";
+			else if (n == 10) {
+				observaciones += subTotalFormatted + ";" + "\n";
+				return;
+			} else
+				observaciones += campo + ";";
+			
+			n++;
+		}
+	}
+
+	private void procesaReferencia(String line) {
+		int n = 0;
+		for (String campo: line.split(";")) {
+			referencias += campo.trim() + ";"; 
+			n++;
+		}
+		referencias = addCampos(referencias, 8-n);
+		referencias += "\n";
+	}
+
+	private void procesaDescuento(String line) {
+		int n=0;
+		for (String campo: line.split(";")) {
+			descuentos += campo.trim() + ";"; 
+			n++;
+		}
+		descuentos = addCampos(descuentos, 6-n);
+		descuentos += "\n";
+	}
+
+	private void procesaDetalle(String line) {
+		detalle += line + "\n";	
+	}
+
+	private void procesaActecos(String line) {
+		int n = 0;
+		for (String campo: line.split(";")) {
+			encabezado += campo.trim() + ";"; 
+			n++;
+		}
+		encabezado = addCampos(encabezado, 1-n);		//actecos
+		encabezado += "\n";		
+	}
+
+	private void procesaEncabezado(String line) throws Exception {
+		logger.debug("Encabezado: " + line);
+		try {
+			int n = 0;
+			for (String campo: line.split(";")) {
+				campo = campo.trim();
+				logger.info("Campos encabezado: " + campo);
+				if (n == 1) {
+					logger.debug("Tipo documento en txt: " + campo);
+					int tipoDocumento = Integer.parseInt(campo);
+					logger.debug("Tipo de documento: " + tipoDocumento);
+					bean.setTipoDocumento(tipoDocumento);
+					logger.debug("Tipo documento en bean: " + bean.getTipoDocumento());
+				}
+				if (n == 3) { 
+					bean.setFolio(new Long(campo));
+					logger.debug("Folio en txt: " + campo);
+					logger.debug("Folio en bean: " + bean.getFolio());
+				}
+				if (n == 18) {
+					campo = campo.toUpperCase();
+					while (campo.startsWith("0"))
+						campo = campo.substring(1);
+					bean.setRutEmisor(campo);
+				}
+				if (n == 28) {
+					campo = campo.toUpperCase();
+					while (campo.startsWith("0"))
+						campo = campo.substring(1);
+				}
+				if (n == 39) {
+					campo = campo.toUpperCase();
+					while (campo.startsWith("0"))
+						campo = campo.substring(1);
+				}
+				
+				encabezado += campo + ";";
+				n++;
+			}
+			encabezado = addCampos(encabezado, 57-n);
+			encabezado += "\n";	
+			
+		} catch (Exception e) {
+			logger.error(e, e);
+			throw new Exception("Error procesando encabezado: " + e.getMessage());
+		}	
+	}
+
+	private void procesaObservaciones(String line) {
+		int n = 0;
+		for (String campo: line.split(";")) {
+			observaciones += campo.trim() + ";"; 
+			n++;
+		}
+		observaciones = addCampos(observaciones, 10-n);
+		observaciones += "\n";
+	}
+	
+	private String addCampos(String line, int i) {
+		String str=line;
+		for (int n=-1; n<i; n++) {
+			str += ";";
+		}
+		return str;
+	}
+
+	public Bean procesaTXT(Path filePath) throws Exception {
+		logger.debug("Start...");
+		observaciones = "";
+		encabezado = "";
+		detalle = "";
+		referencias = "";
+		descuentos = "";
+		subTotal = 0l;
+		
+		bean = new Bean();
+		byte[] contenidoSPF = Files.readAllBytes(filePath);
+		byte[] contenidoContribuyente = getBytes(ClassLoader.getSystemResourceAsStream("78206080-5.csv"));
+		
+		logger.debug(new String(contenidoContribuyente));
+		
+		String contenido = Transformer.getTXT(contenidoSPF, contenidoContribuyente, getTipoDocumento(filePath.getFileName().toString()));
+
+		logger.debug("Contenido: " + contenido);
+		
+		try {
+			String[] lines = contenido.split("\n");
+			for (String line: lines) {
+				if (line.startsWith("A0;"))
+					procesaObservaciones(line);
+				if (line.startsWith("A;"))
+					procesaEncabezado(line);
+				if (line.startsWith("A1;"))
+					procesaActecos(line);
+				if (line.startsWith("B;"))
+					procesaDetalle(line);
+				if (line.startsWith("C;"))
+					procesaDescuento(line);
+				if (line.startsWith("D;"))
+					procesaReferencia(line);
+			}
+			setSubtotal(subTotal);
+			 
+			bean.setContenidoTXT(observaciones + encabezado + detalle + descuentos + referencias);
+		} catch (Exception e){
+			logger.error(e, e);
+			throw new Exception("Error obteniendo datos de archivo TXT: " + e.getMessage());
+		}
+		return bean;
+	}
+
+	private String getTipoDocumento(String nombreArchivo) {
+//		return nombreArchivo.substring(0, nombreArchivo.indexOf("_"));
+		return nombreArchivo;
+	}
+
+	private byte[] getBytes(InputStream fis) {
+        //System.out.println(file.exists() + "!!");
+        //InputStream in = resource.openStream();
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        byte[] buf = new byte[1024];
+        try {
+            for (int readNum; (readNum = fis.read(buf)) != -1;) {
+                bos.write(buf, 0, readNum); //no doubt here is 0
+                //Writes len bytes from the specified byte array starting at offset off to this byte array output stream.
+                System.out.println("read " + readNum + " bytes,");
+            }
+        } catch (IOException ex) {
+            logger.error(ex, ex);
+        }
+        byte[] bytes = bos.toByteArray();
+ 
+		return bytes;
+	}
+}
