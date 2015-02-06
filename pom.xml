@@ -49,7 +49,14 @@
       </plugin>
     </plugins>
   </build>
+  <distributionManagement>
+  <repository>
+    <id>repo_prueba</id>
+    <url>http://nexus.docele.cl/nexus/content/repositories/repo_prueba</url>
+  </repository>
+    </distributionManagement>
   <dependencies>
+
   <dependency>
   	<groupId>org.apache.directory.studio</groupId>
   	<artifactId>org.apache.logging.log4j</artifactId>
